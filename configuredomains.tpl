@@ -153,6 +153,14 @@ var _localLang = {
                             <div class="col-sm-8">{$domainfield}</div>
                         </div>
                     {/foreach}
+                    {*-- resellerclub mods --*}
+                    {foreach key=idndomainfieldname item=idndomainfield from=$domain.lb_idnfields}
+                        <div class="row">
+                            <div class="col-sm-4">{$idndomainfieldname}:</div>
+                            <div class="col-sm-8">{$idndomainfield}</div>
+                        </div>
+                    {/foreach}
+                    {*-- resellerclub mods --*}
 
                 {/foreach}
 

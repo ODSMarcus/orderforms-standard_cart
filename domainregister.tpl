@@ -70,16 +70,26 @@
                     <div id="primaryLookupResult" class="domain-lookup-result hidden">
                         <p class="domain-invalid domain-checker-invalid">{lang key='orderForm.domainLetterOrNumber'}<span class="domain-length-restrictions">{lang key='orderForm.domainLengthRequirements'}</span></p>
                         <p class="domain-unavailable domain-checker-unavailable">{lang key='orderForm.domainIsUnavailable'}</p>
-                        <p class="domain-available domain-checker-available">{$LANG.domainavailable1} <strong></strong> {$LANG.domainavailable2}</p>
-                        <a class="domain-contact-support btn btn-primary">{$LANG.domainContactUs}</a>
-                        <p class="domain-price">
-                            <span class="price"></span>
-                            <button class="btn btn-primary btn-add-to-cart" data-whois="0" data-domain="">
-                                <span class="to-add">{$LANG.addtocart}</span>
-                                <span class="added"><i class="glyphicon glyphicon-shopping-cart"></i> {lang key='checkout'}</span>
-                                <span class="unavailable">{$LANG.domaincheckertaken}</span>
-                            </button>
-                        </p>
+                        {*-- Resellerclub Mods --*}
+                        {if $premium_domain_disabled}
+                            <p style="color:#d9534f;font-weight:bold;">{$lookupTerm} {$LANG.lcdrm_isunavailable}</p>
+                        {else}
+                            <p class="domain-available domain-checker-available">{$LANG.domainavailable1} <strong></strong> {$LANG.domainavailable2}</p>
+                            <a class="domain-contact-support btn btn-primary">{$LANG.domainContactUs}</a>
+                            <p class="domain-price">
+                                {if $premium_price_display}
+                                    <span>{$premium_price_display}</span>
+                                {else}
+                                    <span class="price"></span>
+                                {/if}
+                                <button class="btn btn-primary btn-add-to-cart" data-whois="0" data-domain="">
+                                    <span class="to-add">{$LANG.addtocart}</span>
+                                    <span class="added"><i class="glyphicon glyphicon-shopping-cart"></i> {lang key='checkout'}</span>
+                                    <span class="unavailable">{$LANG.domaincheckertaken}</span>
+                                </button>
+                            </p>
+                        {/if}
+                        {*-- Resellerclub Mods --*}
                         <p class="domain-error domain-checker-unavailable"></p>
                     </div>
                 </div>
@@ -159,103 +169,16 @@
                 </div>
 
             </div>
-
+            <br />
+            {*-- Resellerclub Mods --*}
+            {if $premiumenabled}{include file="$premiumdomains"}{/if}
+            {*-- Resellerclub Mods --*}
+            <br />
+            {*-- Resellerclub Mods --*}
+            {if $suggestenabled}{include file="$suggestdomains"}{/if}
+            {*-- Resellerclub Mods --*}
             <div class="domain-pricing">
-
-                {if $featuredTlds}
-                    <div class="featured-tlds-container">
-                        <div class="row">
-                            {foreach $featuredTlds as $num => $tldinfo}
-                                {if $num % 3 == 0 && (count($featuredTlds) - $num < 3)}
-                                    {if count($featuredTlds) - $num == 2}
-                                        <div class="col-sm-2"></div>
-                                    {else}
-                                        <div class="col-sm-4"></div>
-                                    {/if}
-                                {/if}
-                                <div class="col-sm-4 col-xs-6">
-                                    <div class="featured-tld">
-                                        <div class="img-container">
-                                            <img src="{$BASE_PATH_IMG}/tld_logos/{$tldinfo.tldNoDots}.png">
-                                        </div>
-                                        <div class="price {$tldinfo.tldNoDots}">
-                                            {if is_object($tldinfo.register)}
-                                                {$tldinfo.register->toPrefixed()}{if $tldinfo.period > 1}{lang key="orderForm.shortPerYears" years={$tldinfo.period}}{else}{lang key="orderForm.shortPerYear" years=''}{/if}
-                                            {else}
-                                                {lang key="domainregnotavailable"}
-                                            {/if}
-                                        </div>
-                                    </div>
-                                </div>
-                            {/foreach}
-                        </div>
-                    </div>
-                {/if}
-
-                <h4>{lang key='pricing.browseExtByCategory'}</h4>
-
-                <div class="tld-filters">
-                    {foreach $categoriesWithCounts as $category => $count}
-                        <a href="#" data-category="{$category}" class="label label-default">{lang key="domainTldCategory.$category" defaultValue=$category} ({$count})</a>
-                    {/foreach}
-                </div>
-
-                <div class="row tld-pricing-header text-center">
-                    <div class="col-sm-4 no-bg">{lang key='orderdomain'}</div>
-                    <div class="col-sm-8">
-                        <div class="row">
-                            <div class="col-xs-4">{lang key='pricing.register'}</div>
-                            <div class="col-xs-4">{lang key='pricing.transfer'}</div>
-                            <div class="col-xs-4">{lang key='pricing.renewal'}</div>
-                        </div>
-                    </div>
-                </div>
-                {foreach $pricing['pricing'] as $tld => $price}
-                    <div class="row tld-row" data-category="{foreach $price.categories as $category}|{$category}|{/foreach}">
-                        <div class="col-sm-4 two-row-center">
-                            <strong>.{$tld}</strong>
-                            {if $price.group}
-                                <span class="tld-sale-group tld-sale-group-{$price.group}">{$price.group}!</span>
-                            {/if}
-                        </div>
-                        <div class="col-sm-8">
-                            <div class="row">
-                                <div class="col-xs-4 text-center">
-                                    {if current($price.register) >= 0}
-                                        {current($price.register)}<br>
-                                        <small>{key($price.register)} {if key($price.register) > 1}{lang key="orderForm.years"}{else}{lang key="orderForm.year"}{/if}</small>
-                                    {else}
-                                        <small>N/A</small>
-                                    {/if}
-                                </div>
-                                <div class="col-xs-4 text-center">
-                                    {if current($price.transfer) > 0}
-                                        {current($price.transfer)}<br>
-                                        <small>{key($price.transfer)} {if key($price.register) > 1}{lang key="orderForm.years"}{else}{lang key="orderForm.year"}{/if}</small>
-                                    {else}
-                                        <small>N/A</small>
-                                    {/if}
-                                </div>
-                                <div class="col-xs-4 text-center">
-                                    {if current($price.renew) > 0}
-                                        {current($price.renew)}<br>
-                                        <small>{key($price.renew)} {if key($price.register) > 1}{lang key="orderForm.years"}{else}{lang key="orderForm.year"}{/if}</small>
-                                    {else}
-                                        <small>N/A</small>
-                                    {/if}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                {/foreach}
-                <div class="row tld-row no-tlds">
-                    <div class="col-xs-12 text-center">
-                        <br>
-                        {lang key='pricing.selectExtCategory'}
-                        <br><br>
-                    </div>
-                </div>
-
+                <script language="javascript" src = "widgets/domainpricelist.php?currency={$smarty.post.currency}"></script>
             </div>
 
             <div class="row">
@@ -307,3 +230,14 @@ jQuery(document).ready(function() {
 {/if}
 });
 </script>
+{*-- Resellerclub Mods --*}
+<script type="text/javascript">
+jQuery(document).ready(function() {
+   jQuery('#frmDomainChecker').click(function(){
+        jQuery('#frmDomainChecker').unbind('submit');   
+        jQuery('#frmDomainChecker').attr('action', 'domainchecker.php');
+        jQuery(this).attr("id","");
+    });
+});
+</script>
+{*-- Resellerclub Mods --*}
