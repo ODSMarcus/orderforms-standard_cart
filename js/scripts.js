@@ -560,6 +560,30 @@ jQuery(document).ready(function() {
     });
 });
 
+function scrollToGatewayInputError() {
+    var displayError = jQuery('.gateway-errors,.assisted-cc-input-feedback').first(),
+        frm = displayError.closest('form');
+    if (!frm) {
+        frm = jQuery('form').first();
+    }
+    frm.find('button[type="submit"],input[type="submit"]')
+        .prop('disabled', false)
+        .removeClass('disabled')
+        .find('i.fas,i.far,i.fal,i.fab')
+        .removeAttr('class')
+        .addClass('fas fa-arrow-circle-right')
+        .find('span').toggleClass('hidden');
+
+    if (displayError.length) {
+        jQuery('html, body').animate(
+            {
+                scrollTop: displayError.offset().top - 50
+            },
+            500
+        );
+    }
+}
+
 /**
  * WHMCS authentication module
  *
@@ -929,6 +953,40 @@ jqClient: function () {
      * @param options
      * @returns {*}
      */
+    this.jsonGet = function (options) {
+        options = options || {};
+        this.get(options.url, options.data, function(response) {
+            if (response.warning) {
+                console.log('[WHMCS] Warning: ' + response.warning);
+                if (typeof options.warning === 'function') {
+                    options.warning(response.warning);
+                }
+            } else if (response.error) {
+                console.log('[WHMCS] Error: ' + response.error);
+                if (typeof options.error === 'function') {
+                    options.error(response.error);
+                }
+            } else {
+                if (typeof options.success === 'function') {
+                    options.success(response);
+                }
+            }
+        }, 'json').error(function(xhr, errorMsg){
+            console.log('[WHMCS] Error: ' + errorMsg);
+            if (typeof options.fail === 'function') {
+                options.fail(errorMsg);
+            }
+        }).always(function() {
+            if (typeof options.always === 'function') {
+                options.always();
+            }
+        });
+    };
+
+    /**
+     * @param options
+     * @returns {*}
+     */
     this.jsonPost = function (options) {
         options = options || {};
         this.post(options.url, options.data, function(response) {
@@ -1215,29 +1273,44 @@ dataTable: function () {
     return this;
 },
 
+clipboard: function() {
+    this.copy = function(e) {
+        e.preventDefault();
+
+        var trigger = $(e.currentTarget);
+        var contentElement = $(trigger).data('clipboard-target');
+        var container = $(contentElement).parent();
+
+        try {
+            var tempElement = $('<textarea>')
+                .css('position', 'fixed')
+                .css('opacity', '0')
+                .css('width', '1px')
+                .css('height', '1px')
+                .val($(contentElement).val());
+
+            container.append(tempElement);
+            tempElement.focus().select();
+            document.execCommand('copy');
+        } finally {
+            tempElement.remove();
+        }
+
+        trigger.tooltip({
+            trigger: 'click',
+            placement: 'bottom'
+        });
+        WHMCS.ui.toolTip.setTip(trigger, 'Copied!');
+        WHMCS.ui.toolTip.hideTip(trigger);
+    };
+
+    return this;
+},
+
 /**
  * ToolTip and Clipboard behaviors
  */
 toolTip: function () {
-    this.registerClipboard = function () {
-        var self = this;
-        jQuery('[data-toggle="tooltip"]').tooltip();
-        var clipboard = new Clipboard('.copy-to-clipboard');
-        clipboard.on('success', function(e) {
-            var btn = jQuery(e.trigger);
-            self.setTip(btn, 'Copied!');
-            self.hideTip(btn);
-        });
-        clipboard.on('error', function(e) {
-            self.setTip(e.trigger, 'Press Ctrl+C to copy');
-            self.hideTip(e.trigger);
-        });
-        $('.copy-to-clipboard').tooltip({
-            trigger: 'click',
-            placement: 'bottom'
-        });
-    };
-
     this.setTip = function (btn, message) {
         var tip = btn.data('bs.tooltip');
         if (tip.hoverState !== 'in') {
@@ -1254,6 +1327,193 @@ toolTip: function () {
             btn.data('bs.tooltip').hide()
         }, 2000);
     }
+},
+
+jsonForm: function() {
+    this.managedElements = 'input,textarea,select';
+
+    this.initFields = function (form) {
+        var self = this;
+        $(form).find(self.managedElements).each(function () {
+            var field = this;
+
+            $(field).on('keypress change', function () {
+                if (self.fieldHasError(field)) {
+                    self.clearFieldError(field);
+                }
+            });
+        });
+    };
+
+    this.init = function (form) {
+        var self = this;
+
+        self.initFields(form);
+
+        $(form).on('submit', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            self.clearErrors(form);
+
+            var formModal = $(form).parents('.modal[role="dialog"]').first();
+
+            if ($(formModal).length) {
+                $(formModal).on('show.bs.modal hidden.bs.modal', function() {
+                    self.clearErrors(form);
+                });
+
+                /*
+                 * Make this optional if the form is used for editing
+                 */
+                $(formModal).on('show.bs.modal', function() {
+                    $(form)[0].reset();
+                });
+            }
+
+            WHMCS.http.client.post({
+                url: $(form).attr('action'),
+                data: $(form).serializeArray(),
+            })
+                .done(function (response) {
+                    self.onSuccess(form, response);
+                })
+                .fail(function (jqXHR) {
+                    self.onError(form, jqXHR);
+                })
+                .always(function (data) {
+                    self.onRequestComplete(form, data);
+                });
+        });
+    };
+
+    this.initAll = function () {
+        var self = this;
+
+        $('form[data-role="json-form"]').each(function() {
+            var formElement = this;
+            self.init(formElement);
+        });
+    };
+
+    this.markFieldErrors = function (form, fields)
+    {
+        var self = this;
+        var errorMessage = null;
+        var field, fieldLookup;
+
+        for (var fieldName in fields) {
+            if (fields.hasOwnProperty(fieldName)) {
+                errorMessage = fields[fieldName];
+            }
+
+            fieldLookup = self.managedElements.split(',').map(function(element) {
+                return element + '[name="' + fieldName + '"]';
+            }).join(',');
+
+            field = $(form).find(fieldLookup);
+
+            if (errorMessage) {
+                $(field).parents('.form-group').addClass('has-error');
+                $(field).attr('title', errorMessage);
+                $(field).tooltip();
+            }
+        }
+
+        $(form).find('.form-group.has-error input[title]').first().tooltip('show');
+    };
+
+    this.fieldHasError = function (field) {
+        return $(field).parents('.form-group').hasClass('has-error');
+    };
+
+    this.clearFieldError = function (field) {
+        $(field).tooltip('destroy');
+        $(field).parents('.form-group').removeClass('has-error');
+    };
+
+    this.onSuccess = function (form, response) {
+        var formOnSuccess = $(form).data('on-success');
+
+        if (typeof formOnSuccess === 'function') {
+            formOnSuccess(response.data);
+        }
+    };
+
+    this.onError = function (form, jqXHR) {
+        if (jqXHR.responseJSON && jqXHR.responseJSON.fields && typeof jqXHR.responseJSON.fields === 'object') {
+            this.markFieldErrors(form, jqXHR.responseJSON.fields);
+        } else {
+            // TODO: replace with client-accessible generic error messaging
+            console.log('Unknown error - please try again later.');
+        }
+
+        var formOnError = $(form).data('on-error');
+
+        if (typeof formOnError === 'function') {
+            formOnError(jqXHR);
+        }
+    };
+
+    this.clearErrors = function (form) {
+        var self = this;
+
+        $(form).find(self.managedElements).each(function () {
+            self.clearFieldError(this);
+        })
+    };
+
+    this.onRequestComplete = function (form, data) {
+        // implement as needed
+    };
+
+    return this;
+},
+
+effects: function () {
+    this.errorShake = function (element) {
+        /**
+         * Shake effect without jQuery UI inspired by Hiren Patel | ninty9notout:
+         * @see https://github.com/ninty9notout/jquery-shake/blob/51f3dcf625970c78505bcac831fd9e28fc85d374/jquery.ui.shake.js
+         */
+        options = options || {};
+        var options = $.extend({
+            direction: "left",
+            distance: 8,
+            times: 3,
+            speed: 90
+        }, options);
+
+        return element.each(function () {
+            var el = $(this), props = {
+                position: el.css("position"),
+                top: el.css("top"),
+                bottom: el.css("bottom"),
+                left: el.css("left"),
+                right: el.css("right")
+            };
+
+            el.css("position", "relative");
+
+            var ref = (options.direction === "up" || options.direction === "down") ? "top" : "left";
+            var motion = (options.direction === "up" || options.direction === "left") ? "pos" : "neg";
+
+            var animation = {}, animation1 = {}, animation2 = {};
+            animation[ref] = (motion === "pos" ? "-=" : "+=") + options.distance;
+            animation1[ref] = (motion === "pos" ? "+=" : "-=") + options.distance * 2;
+            animation2[ref] = (motion === "pos" ? "-=" : "+=") + options.distance * 2;
+
+            el.animate(animation, options.speed);
+            for (var i = 1; i < options.times; i++) {
+                el.animate(animation1, options.speed).animate(animation2, options.speed);
+            }
+
+            el.animate(animation1, options.speed).animate(animation, options.speed / 2, function () {
+                el.css(props);
+            });
+        });
+    };
+
 }
 });
 
@@ -1315,6 +1575,16 @@ function () {
                 }
             }
         });
+    };
+
+    this.reloadCaptcha = function (element)
+    {
+        if (!element) {
+            element = jQuery('#inputCaptchaImage');
+        }
+
+        var src = jQuery(element).data('src');
+        jQuery(element).attr('src', src + '?nocache=' + (new Date()).getTime());
     };
 
     return this;
@@ -1526,7 +1796,78 @@ function () {
 
     this.normaliseStringValue = function(status) {
         return status ? status.toLowerCase().replace(/\s/g, '-') : '';
-    }
+    };
+
+    this.generatePassword = function(len) {
+        var charset = this.getPasswordCharacterSet();
+        var result = "";
+        for (var i = 0; len > i; i++)
+            result += charset[this.randomInt(charset.length)];
+        return result;
+    };
+    this.getPasswordCharacterSet = function() {
+        var rawCharset = '0123456789'
+            + 'abcdefghijklmnopqrstuvwxyz'
+            + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+            + '!#$%()*+,-.:;=@_|{ldelim}{rdelim}~';
+
+        // Parse UTF-16, remove duplicates, convert to array of strings
+        var charset = [];
+        for (var i = 0; rawCharset.length > i; i++) {
+            var c = rawCharset.charCodeAt(i);
+            if (0xD800 > c || c >= 0xE000) {  // Regular UTF-16 character
+                var s = rawCharset.charAt(i);
+                if (charset.indexOf(s) == -1)
+                    charset.push(s);
+                continue;
+            }
+            if (0xDC00 > c ? rawCharset.length > i + 1 : false) {  // High surrogate
+                var d = rawCharset.charCodeAt(i + 1);
+                if (d >= 0xDC00 ? 0xE000 > d : false) {  // Low surrogate
+                    var s = rawCharset.substring(i, i + 2);
+                    i++;
+                    if (charset.indexOf(s) == -1)
+                        charset.push(s);
+                    continue;
+                }
+            }
+            throw "Invalid UTF-16";
+        }
+        return charset;
+    };
+    this.randomInt = function(n) {
+        var x = this.randomIntMathRandom(n);
+        x = (x + this.randomIntBrowserCrypto(n)) % n;
+        return x;
+    };
+    this.randomIntMathRandom = function(n) {
+        var x = Math.floor(Math.random() * n);
+        if (0 > x || x >= n)
+            throw "Arithmetic exception";
+        return x;
+    };
+    this.randomIntBrowserCrypto = function(n) {
+        var cryptoObject = null;
+
+        if ("crypto" in window)
+            cryptoObject = crypto;
+        else if ("msCrypto" in window)
+            cryptoObject = msCrypto;
+        else
+            return 0;
+
+        if (!("getRandomValues" in cryptoObject) || !("Uint32Array" in window) || typeof Uint32Array != "function")
+            cryptoObject = null;
+
+        if (cryptoObject == null)
+            return 0;
+
+        // Generate an unbiased sample
+        var x = new Uint32Array(1);
+        do cryptoObject.getRandomValues(x);
+        while (x[0] - x[0] % n > 4294967296 - n);
+        return x[0] % n;
+    };
 
     return this;
 });
@@ -1549,6 +1890,7 @@ if (typeof localTrans === 'undefined') {
 }
 
 var domainLookupCallCount,
+    checkoutForm,
     furtherSuggestions;
 
 jQuery(document).ready(function(){
@@ -1560,21 +1902,26 @@ jQuery(document).ready(function(){
         increaseArea: '20%'
     });
 
-    $('.mc-promo .header').click(function(e) {
+    jQuery('.mc-promo .header').click(function(e) {
         e.preventDefault();
-        if ($(e.target).is('.btn, .btn span,.btn .fa')) {
+        if (jQuery(e.target).is('.btn, .btn span,.btn .fa')) {
             return;
         }
-        $(this).parent().find('.rotate').toggleClass('down');
-        $(this).parent().find('.body').slideToggle('fast');
+        jQuery(this).parent().find('.rotate').toggleClass('down');
+        jQuery(this).parent().find('.body').slideToggle('fast');
     });
-    $('.mc-promos.viewcart .mc-promo:first-child .header').click();
+    jQuery('.mc-promos.viewcart .mc-promo:first-child .header').click();
 
-    if (jQuery('#inputCardNumber').length) {
-        jQuery('#inputCardNumber').payment('formatCardNumber');
+    var cardNumber = jQuery('#inputCardNumber'),
+        existingCvv = jQuery('#inputCardCVV2');
+    if (cardNumber.length) {
+        cardNumber.payment('formatCardNumber');
         jQuery('#inputCardCVV').payment('formatCardCVC');
         jQuery('#inputCardStart').payment('formatCardExpiry');
         jQuery('#inputCardExpiry').payment('formatCardExpiry');
+    }
+    if (existingCvv.length) {
+        existingCvv.payment('formatCardCVC');
     }
 
     var $orderSummaryEl = jQuery("#orderSummary");
@@ -1830,10 +2177,12 @@ jQuery(document).ready(function(){
                         invalid= result.find('.domain-invalid'),
                         contactSupport = result.find('.domain-contact-support'),
                         resultDomain = jQuery('#resultDomain'),
-                        resultDomainPricing = jQuery('#resultDomainPricingTerm');
+                        resultDomainPricing = jQuery('#resultDomainPricingTerm'),
+                        error = result.find('.domain-error');
                     result.removeClass('hidden').show();
                     jQuery('.domain-lookup-primary-loader').hide();
                     if (!data.result.error && domain.isValidDomain) {
+                        error.hide();
                         pricing = domain.pricing;
                         if (domain.isAvailable && typeof pricing !== 'string') {
                             if (domain.preferredTLDNotAvailable) {
@@ -1855,14 +2204,22 @@ jQuery(document).ready(function(){
                             }
                         }
                     } else {
-                        var invalidLength = invalid.find('span.domain-length-restrictions');
+                        var invalidLength = invalid.find('span.domain-length-restrictions'),
+                            done = false;
                         invalidLength.hide();
+                        error.hide();
                         if (domain.minLength > 0 && domain.maxLength > 0) {
                             invalidLength.find('.min-length').html(domain.minLength).end()
                                 .find('.max-length').html(domain.maxLength).end();
                             invalidLength.show();
+                        } else if (data.result.error) {
+                            error.text(data.result.error);
+                            error.show();
+                            done = true;
                         }
-                        invalid.show();
+                        if (!done) {
+                            invalid.show();
+                        }
                     }
 
 
@@ -2047,7 +2404,13 @@ jQuery(document).ready(function(){
                         window.location = 'cart.php?a=confproduct&i=' + result.num;
                     } else {
                         jQuery('.domain-lookup-primary-loader').hide();
-                        jQuery('#primaryLookupResult').removeClass('hidden').show().find('.domain-invalid').show();
+                        if (typeof result === 'string') {
+                            jQuery('#primaryLookupResult').removeClass('hidden').show().find('.domain-error')
+                                .text(result)
+                                .show();
+                        } else {
+                            jQuery('#primaryLookupResult').removeClass('hidden').show().find('.domain-invalid').show();
+                        }
                     }
                 });
 
@@ -2093,25 +2456,134 @@ jQuery(document).ready(function(){
         }
     });
 
+    var existingCards = jQuery('.existing-card'),
+        cvvFieldContainer = jQuery('#cvv-field-container'),
+        existingCardContainer = jQuery('#existingCardsContainer'),
+        newCardInfo = jQuery('#newCardInfo'),
+        newCardSaveSettings = jQuery('#newCardSaveSettings'),
+        inputNoStoreContainer = jQuery('#inputNoStoreContainer'),
+        existingCardInfo = jQuery('#existingCardInfo'),
+        newCardOption = jQuery('#new'),
+        creditCardInputFields = jQuery('#creditCardInputFields');
+
+    existingCards.on('ifChecked', function(event) {
+        newCardSaveSettings.slideUp().find('input').attr('disabled', 'disabled');
+        if (jQuery('.payment-methods:checked').data('remote-inputs') === 1) {
+            return;
+        }
+
+        newCardInfo.slideUp().find('input').attr('disabled', 'disabled');
+        existingCardInfo.slideDown().find('input').removeAttr('disabled');
+    });
+    newCardOption.on('ifChecked', function(event) {
+        newCardSaveSettings.slideDown().find('input').removeAttr('disabled');
+        if (jQuery('.payment-methods:checked').data('remote-inputs') === 1) {
+            return;
+        }
+
+        newCardInfo.slideDown().find('input').removeAttr('disabled');
+        existingCardInfo.slideUp().find('input').attr('disabled', 'disabled');
+    });
+
+    if (!existingCards.length) {
+        existingCardInfo.slideUp().find('input').attr('disabled', 'disabled');
+    }
+
     jQuery(".payment-methods").on('ifChecked', function(event) {
         if (jQuery(this).hasClass('is-credit-card')) {
-            if (!jQuery("#creditCardInputFields").is(":visible")) {
-                jQuery("#creditCardInputFields").hide().removeClass('hidden').slideDown();
+            var gatewayPaymentType = jQuery(this).data('payment-type'),
+                gatewayModule = jQuery(this).val(),
+                showLocal = jQuery(this).data('show-local'),
+                relevantMethods = [];
+            if (gatewayPaymentType === 'RemoteCreditCard') {
+                inputNoStoreContainer.hide().find('input').prop('disabled', 'disabled');
+            } else {
+                if (!(inputNoStoreContainer.is(':visible'))) {
+                    inputNoStoreContainer.show().find('input').removeProp('disabled');
+                }
+            }
+
+            existingCards.each(function(index) {
+                var paymentType = jQuery(this).data('payment-type'),
+                    paymentModule = jQuery(this).data('payment-gateway'),
+                    payMethodId = jQuery(this).val();
+
+                var paymentTypeMatch = (paymentType === gatewayPaymentType);
+
+                var paymentModuleMatch = false;
+                if (gatewayPaymentType === 'RemoteCreditCard') {
+                    // only show remote credit cards that belong to the selected gateway
+                    paymentModuleMatch = (paymentModule === gatewayModule);
+                } else if (gatewayPaymentType === 'CreditCard') {
+                    // any local credit card can be used with any credit card gateway
+                    paymentModuleMatch = true;
+                }
+
+                if (showLocal && paymentType === 'CreditCard') {
+                    paymentTypeMatch = true;
+                    paymentModuleMatch = true;
+                }
+
+                var payMethodElements = jQuery('[data-paymethod-id="' + payMethodId + '"]');
+
+                if (paymentTypeMatch && paymentModuleMatch) {
+                    jQuery(payMethodElements).show();
+                    relevantMethods.push(this);
+                } else {
+                    jQuery(payMethodElements).hide();
+                }
+            });
+
+            var enabledRelevantMethods = relevantMethods.filter(function (item) {
+                return ! jQuery(item).attr('disabled');
+            });
+
+            if (enabledRelevantMethods.length > 0) {
+                var defaultId = null;
+                jQuery.each(enabledRelevantMethods, function(index, value) {
+                    var jQueryElement = jQuery(value),
+                        order = parseInt(jQueryElement.data('order-preference'), 10);
+                    if ((defaultId === null) || (order < defaultId)) {
+                        defaultId = jQueryElement.val();
+                    }
+                });
+                if (defaultId === null) {
+                    defaultId = 'new';
+                }
+
+                jQuery.each(enabledRelevantMethods, function(index, value) {
+                    var jQueryElement = jQuery(value);
+                    if (jQueryElement.val() === defaultId) {
+                        jQueryElement.iCheck('check');
+                        return false;
+                    }
+                });
+
+                existingCardContainer.show();
+                existingCardInfo.removeClass('hidden').show().find('input').removeAttr('disabled');
+            } else {
+                jQuery(newCardOption).iCheck('check');
+                existingCardContainer.hide();
+                existingCardInfo.hide().find('input').attr('disabled', 'disabled');
+            }
+
+            if (!creditCardInputFields.is(":visible")) {
+                creditCardInputFields.hide().removeClass('hidden').slideDown();
             }
         } else {
-            jQuery("#creditCardInputFields").slideUp();
+            creditCardInputFields.slideUp();
         }
     });
 
-    jQuery("input[name='ccinfo']").on('ifChecked', function(event) {
-        if (jQuery(this).val() == 'new') {
-            jQuery("#existingCardInfo").slideUp('', function() {
-                jQuery("#newCardInfo").hide().removeClass('hidden').slideDown();
-            });
-        } else {
-            jQuery("#newCardInfo").slideUp('', function() {
-                jQuery("#existingCardInfo").hide().removeClass('hidden').slideDown();
-            });
+    // make sure relevant payment methods are displayed for the pre-selected gateway
+    jQuery(".payment-methods:checked").trigger('ifChecked');
+
+    jQuery('.cc-input-container .paymethod-info').click(function() {
+        var payMethodId = $(this).data('paymethod-id');
+        var input = jQuery('input[name="ccinfo"][value=' + payMethodId + ']:not(:disabled)');
+
+        if (input.length > 0) {
+            input.iCheck('check');
         }
     });
 
@@ -2281,7 +2753,7 @@ jQuery(document).ready(function(){
                             .find('.max-length').html(domain.maxLength).end();
                         invalidLength.show();
                     } else if (data.result.error) {
-                        error.html(data.result.error);
+                        error.text(data.result.error);
                         error.show();
                         done = true;
                     }
@@ -2698,7 +3170,69 @@ jQuery(document).ready(function(){
             jQuery(this).toggle(jQuery(this).data('domain').toLowerCase().indexOf(inputText) > -1);
         });
     });
+
+    checkoutForm = jQuery('#frmCheckout');
+    if (checkoutForm.length) {
+        checkoutForm.on('submit', validateCheckoutCreditCardInput);
+    }
+
+    if (existingCardContainer.is(':visible')) {
+        newCardInfo.hide();
+    }
 });
+//checkoutForm
+function validateCheckoutCreditCardInput(e)
+{
+    var newOrExisting = jQuery('input[name="ccinfo"]:checked').val(),
+        submitButton = checkoutForm.find('*[type="submit"]'),
+        cardType = null,
+        submit = true,
+        selectedPaymentMethod = checkoutForm.find('input[name="paymentmethod"]:checked'),
+        isCreditCardGateway = selectedPaymentMethod.hasClass('is-credit-card'),
+        isRemoteCard = selectedPaymentMethod.data('payment-type') === 'RemoteCreditCard',
+        cardNumber = jQuery('#inputCardNumber');
+
+    checkoutForm.find('.form-group').removeClass('has-error');
+    checkoutForm.find('.field-error-msg').hide();
+
+    if (isCreditCardGateway && !isRemoteCard) {
+        var cvvField = checkoutForm.find('#inputCardCVV2');
+
+        if (newOrExisting === 'new') {
+            cvvField = checkoutForm.find('#inputCardCVV');
+
+            cardType = jQuery.payment.cardType(checkoutForm.find('#inputCardNumber').val());
+            if (!jQuery.payment.validateCardNumber(checkoutForm.find('#inputCardNumber').val()) || cardNumber.hasClass('unsupported')) {
+                var error = cardNumber.data('message-invalid');
+                if (cardNumber.hasClass('unsupported')) {
+                    error = cardNumber.data('message-unsupported');
+                }
+                checkoutForm.find('#inputCardNumber').setInputError(error).showInputError();
+                submit = false;
+            }
+            if (
+                !jQuery.payment.validateCardExpiry(
+                    checkoutForm.find('#inputCardExpiry').payment('cardExpiryVal')
+                )
+            ) {
+                checkoutForm.find('#inputCardExpiry').showInputError();
+                submit = false;
+            }
+        }
+        if (!jQuery.payment.validateCardCVC(cvvField.val(), cardType)) {
+            cvvField.showInputError();
+            submit = false;
+        }
+        if (!submit) {
+            submitButton.prop('disabled', false)
+                .removeClass('disabled')
+                .find('i')
+                .removeAttr('class')
+                .addClass('fas fa-arrow-circle-right');
+            e.preventDefault();
+        }
+    }
+}
 
 function hasDomainLookupEnded() {
     domainLookupCallCount++;
@@ -2814,7 +3348,7 @@ function selectDomainPeriodInCart(domainName, price, period, yearsString) {
         function(data) {
             data.domains.forEach(function(domain) {
                 jQuery("[name='" + domain.domain + "Price']").parent('div').find('.renewal-price').html(
-                    domain.renewprice + domain.shortYearsLanguage
+                    domain.prefixedRenewPrice + domain.shortRenewalYearsLanguage
                 ).end();
             });
             jQuery('#subtotal').html(data.subtotal);
@@ -2910,7 +3444,7 @@ function validate_captcha(form)
             jQuery('#inputCaptcha').attr('data-original-title', data.error).tooltip('show');
             if (captcha.length) {
                 jQuery('#inputCaptchaImage').replaceWith(
-                    '<img id="inputCaptchaImage" src="includes/verifyimage.php" align="middle" />'
+                    '<img id="inputCaptchaImage" src="' + whmcsBaseUrl + 'includes/verifyimage.php" align="middle" />'
                 );
             }
         } else {
